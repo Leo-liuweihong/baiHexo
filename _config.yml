@@ -103,4 +103,4 @@ theme: landscape
 deploy:
   type: git
   repo: git@github.com:Leo-liuweihong/baiHexo.git
-  branch: master
+  branch: gh-pages
