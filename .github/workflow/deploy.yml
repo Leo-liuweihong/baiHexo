@@ -3,48 +3,67 @@ name: Deploy Hexo to GitHub Pages
 on:
   push:
     branches:
-      - main  # 当推送到 main 分支时触发
+      - main  # 推送到 main 分支时触发
+  # 可选：允许手动触发部署
+  workflow_dispatch:
 
 jobs:
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # 授予写入仓库内容的权限（GH_TOKEN 需要）
+      pages: write     # 可选：如果用 GitHub Pages 官方 Action 需此权限
+      id-token: write
 
     steps:
+      # 1. 拉取仓库代码（升级到v4，开启子模块支持）
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
-          submodules: false  # 禁用子模块检查
+          submodules: true  # 有主题子模块则设为true，无则false
+          fetch-depth: 0    # 拉取完整提交历史，避免Hexo生成文章时间异常
 
+      # 2. 配置Node.js（升级到v4，适配LTS版本）
       - name: Setup Node.js
-        uses: actions/setup-node@v2
+        uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: lts/*  # 自动使用最新LTS版（如20.x）
+          cache: 'npm'         # 自动缓存node_modules，加速安装
 
+      # 3. 安装依赖（移除全局hexo-cli，用npx调用）
       - name: Install Dependencies
-        run: npm install
-
-      - name: Install Hexo Git Deployer
         run: |
+          npm install --force  # --force 解决部分依赖冲突（可选）
           npm install hexo-deployer-git --save
-          npm install hexo-cli -g
 
+      # 4. 清理并生成静态文件（设置换行符，避免格式异常）
       - name: Clean and Generate Static Files
         run: |
+          git config --global core.autocrlf false
           hexo clean
           hexo generate
 
-      - name: Configure Git
-        run: |
-          git config --global user.name 'github-actions[bot]'
-          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-
+      # 5. 部署到gh-pages分支（使用默认GH_TOKEN，简化配置）
       - name: Deploy to GitHub Pages
         env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          # 使用GitHub默认TOKEN，无需手动创建
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 你的仓库地址（替换为自己的）
+          REPO_URL: https://github.com/Leo-liuweihong/baiHexo.git
         run: |
-          cd public/
+          cd public
+          # 初始化git并配置
           git init
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          # 关联远程仓库
+          git remote add origin $REPO_URL
+          # 拉取gh-pages分支（避免强制推送丢失历史）
+          git fetch origin gh-pages || true
+          git checkout -b gh-pages origin/gh-pages || git checkout -b gh-pages
+          # 添加并提交静态文件
           git add -A
-          git commit -m "Create by workflows"
-          git remote add origin https://${{ secrets.GH_TOKEN }}@github.com/Leo-liuweihong/baiHexo.git
-          git push origin HEAD:gh-pages -f
+          git commit -m "Deploy Hexo site: $(git rev-parse --short HEAD)" || echo "No changes to commit"
+          # 推送（强制推送确保覆盖，适合静态站点）
+          git push origin gh-pages -f
+          cd ..
